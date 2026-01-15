@@ -1,0 +1,70 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "g3pylib"
+authors = [
+    {name = "Markus Wesslén", email = "mw2013@tobii.com"},
+    {name = "Oskar Söderberg", email = "os2012@tobii.com"}
+]
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Development Status :: 3 - Alpha",
+    "Typing :: Typed",
+    "Private :: Do Not Upload"
+]
+requires-python = ">=3.10"
+license = {file = "LICENSE.md"}
+dependencies = [
+    "websockets ~= 10.3",
+    "zeroconf ~= 0.47.1",
+    "aiortsp @ git+https://github.com/m4reko/aiortsp@master",
+    "av ~= 8.1.0",
+    "aiohttp ~= 3.8.1"
+]
+dynamic = ["version", "description"]
+
+[project.optional-dependencies]
+test = [
+    "python-dotenv",
+    "pytest",
+    "pytest-dotenv",
+    "pytest-asyncio"
+]
+doc = ["pdoc"]
+dev = [
+    "isort",
+    "black",
+    "pyflakes",
+    "pre-commit"
+]
+examples = [
+    "python-dotenv",
+    "opencv-python"
+]
+example-app = [
+    "kivy[media] ~= 2.1.0"
+]
+
+[project.urls]
+Home = "https://github.com/tobiipro/g3pylib"
+
+[tool.pyright]
+include = ["src", "examples", "tests"]
+typeCheckingMode = "basic"
+strict = ["src", "tests"]
+
+[tool.isort]
+profile = "black"
+src_paths = ["src", "examples", "tests"]
+skip_gitignore = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+# Timeout
+faulthandler_timeout=30

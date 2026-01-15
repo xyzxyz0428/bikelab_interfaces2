@@ -1,81 +1,145 @@
 #!/bin/bash
 set -euo pipefail
 
+# =========================
+# User settings
+# =========================
 DEV="/dev/video1"
+
+# 录制格式：识别优先建议 YUYV；CPU/IO优先可用 MJPG
+# 可选：YUYV 或 MJPG
+PIX="YUYV"
+
+# 识别优先建议：640x480 或 800x600；过曝严重就先降分辨率
+W=640
+H=480
 FPS=30
-W=1280
-H=720
 
-# 建议：设置一个默认录制时长，最稳（秒）。留空则录到 Ctrl+C
-DURATION=""   # 例如 "300"=5分钟；""=手动停止
+# 录制时长：留空=按 Ctrl+C 停；建议采集用固定时长更稳
+DURATION=""   # e.g. "300" for 5 min
 
-TS="$(date +'%Y-%m-%d_%H-%M-%S')"
+# 默认保存路径
 DEFAULT_DIR="/media/bikelab2/TRANSCEND/bikelab_data/video"
-DEFAULT_FILE="$DEFAULT_DIR/viewsonic_${W}x${H}_${FPS}fps_${TS}.avi"  # 用 avi 更抗中断
 
-ARG="${1:-}"
-if [[ -z "$ARG" ]]; then
+# profile: sunny / normal
+PROFILE="${1:-normal}"
+
+# 输出路径参数（第2个参数）
+ARG_OUT="${2:-}"
+
+# =========================
+# Output file handling
+# =========================
+TS="$(date +'%Y-%m-%d_%H-%M-%S')"
+EXT="avi"   # AVI 最抗中断，采集更稳
+
+DEFAULT_FILE="$DEFAULT_DIR/viewsonic_${PROFILE}_${W}x${H}_${FPS}fps_${TS}.${EXT}"
+
+if [[ -z "$ARG_OUT" ]]; then
   OUTFILE="$DEFAULT_FILE"
-elif [[ "$ARG" == *.mkv || "$ARG" == *.mp4 || "$ARG" == *.avi ]]; then
-  OUTFILE="$ARG"
+elif [[ "$ARG_OUT" == *.mkv || "$ARG_OUT" == *.mp4 || "$ARG_OUT" == *.avi ]]; then
+  OUTFILE="$ARG_OUT"
 else
-  OUTFILE="$ARG/viewsonic_${W}x${H}_${FPS}fps_${TS}.avi"
+  OUTFILE="$ARG_OUT/viewsonic_${PROFILE}_${W}x${H}_${FPS}fps_${TS}.${EXT}"
 fi
 
 OUTDIR="$(dirname "$OUTFILE")"
 mkdir -p "$OUTDIR"
 
-echo "[1/2] Apply v4l2 controls on $DEV ..."
+# =========================
+# Apply V4L2 controls
+# =========================
+apply_controls() {
+  echo "[1/2] Apply v4l2 controls on $DEV (profile=$PROFILE, pix=$PIX, ${W}x${H}@${FPS}) ..."
 
-v4l2-ctl -d "$DEV" --set-ctrl=auto_exposure=0
-v4l2-ctl -d "$DEV" --set-ctrl=gain=0
-v4l2-ctl -d "$DEV" --set-ctrl=brightness=1
-v4l2-ctl -d "$DEV" --set-ctrl=contrast=6
-v4l2-ctl -d "$DEV" --set-ctrl=gamma=222
-v4l2-ctl -d "$DEV" --set-ctrl=white_balance_automatic=0
-v4l2-ctl -d "$DEV" --set-ctrl=white_balance_temperature=5200
-v4l2-ctl -d "$DEV" --set-ctrl=saturation=80
-v4l2-ctl -d "$DEV" --set-ctrl=sharpness=6
-v4l2-ctl -d "$DEV" --set-ctrl=backlight_compensation=1
+  # 基础：尽量压住过曝、稳定颜色
+  v4l2-ctl -d "$DEV" --set-ctrl=auto_exposure=0
+  v4l2-ctl -d "$DEV" --set-ctrl=gain=0
+  v4l2-ctl -d "$DEV" --set-ctrl=brightness=0
+  v4l2-ctl -d "$DEV" --set-ctrl=backlight_compensation=0
 
-v4l2-ctl -d "$DEV" --set-fmt-video=width=$W,height=$H,pixelformat=MJPG || true
-v4l2-ctl -d "$DEV" --set-parm=$FPS || true
+  # 固定白平衡（室外）
+  v4l2-ctl -d "$DEV" --set-ctrl=white_balance_automatic=0
+  v4l2-ctl -d "$DEV" --set-ctrl=white_balance_temperature=5200
 
-echo "[2/2] Recording to: $OUTFILE"
-if [[ -n "$DURATION" ]]; then
-  echo "Will stop automatically after ${DURATION}s."
-else
-  echo "Press Ctrl+C to stop."
-fi
+  # 分 profile 的“识别向”参数
+  case "$PROFILE" in
+    sunny)
+      v4l2-ctl -d "$DEV" --set-ctrl=contrast=14
+      v4l2-ctl -d "$DEV" --set-ctrl=gamma=150
+      v4l2-ctl -d "$DEV" --set-ctrl=saturation=50
+      v4l2-ctl -d "$DEV" --set-ctrl=sharpness=9
+      ;;
+    normal)
+      v4l2-ctl -d "$DEV" --set-ctrl=contrast=11
+      v4l2-ctl -d "$DEV" --set-ctrl=gamma=180
+      v4l2-ctl -d "$DEV" --set-ctrl=saturation=70
+      v4l2-ctl -d "$DEV" --set-ctrl=sharpness=10
+      ;;
+    *)
+      echo "Unknown PROFILE: $PROFILE (use sunny|normal)"
+      exit 1
+      ;;
+  esac
 
-FFPID=""
-
-cleanup() {
-  if [[ -n "${FFPID}" ]] && kill -0 "$FFPID" 2>/dev/null; then
-    echo ""
-    echo "[!] Ctrl+C received. Letting ffmpeg flush for 1s..."
-    sleep 1
-    kill -INT "$FFPID" 2>/dev/null || true
-    wait "$FFPID" 2>/dev/null || true
-  fi
+  # 设置格式/帧率（不支持就忽略）
+  v4l2-ctl -d "$DEV" --set-fmt-video=width=$W,height=$H,pixelformat=$PIX || true
+  v4l2-ctl -d "$DEV" --set-parm=$FPS || true
 }
-trap cleanup INT TERM
 
-# 录制：MJPG 直接 copy 到 AVI（最省 CPU、最抗中断）
-# 如果 mjpeg 协商失败，去掉 -input_format mjpeg
-if [[ -n "$DURATION" ]]; then
-  ffmpeg -hide_banner -loglevel warning \
-    -f v4l2 -framerate "$FPS" -video_size "${W}x${H}" -input_format mjpeg \
-    -i "$DEV" -t "$DURATION" \
-    -c copy "$OUTFILE" &
-else
-  ffmpeg -hide_banner -loglevel warning \
-    -f v4l2 -framerate "$FPS" -video_size "${W}x${H}" -input_format mjpeg \
-    -i "$DEV" \
-    -c copy "$OUTFILE" &
-fi
+# =========================
+# Record with ffmpeg
+# =========================
+record_video() {
+  echo "[2/2] Recording to: $OUTFILE"
+  if [[ -n "$DURATION" ]]; then
+    echo "Will stop automatically after ${DURATION}s."
+  else
+    echo "Press Ctrl+C to stop."
+  fi
 
-FFPID=$!
-wait "$FFPID" 2>/dev/null || true
+  local FFPID=""
+  cleanup() {
+    if [[ -n "$FFPID" ]] && kill -0 "$FFPID" 2>/dev/null; then
+      echo ""
+      echo "[!] Ctrl+C received. Letting ffmpeg flush for 1s..."
+      sleep 1
+      kill -INT "$FFPID" 2>/dev/null || true
+      wait "$FFPID" 2>/dev/null || true
+    fi
+  }
+  trap cleanup INT TERM
 
-echo "Saved: $OUTFILE"
+  if [[ "$PIX" == "MJPG" ]]; then
+    if [[ -n "$DURATION" ]]; then
+      ffmpeg -hide_banner -loglevel warning \
+        -f v4l2 -framerate "$FPS" -video_size "${W}x${H}" -input_format mjpeg \
+        -i "$DEV" -t "$DURATION" \
+        -c copy "$OUTFILE" &
+    else
+      ffmpeg -hide_banner -loglevel warning \
+        -f v4l2 -framerate "$FPS" -video_size "${W}x${H}" -input_format mjpeg \
+        -i "$DEV" \
+        -c copy "$OUTFILE" &
+    fi
+  else
+    if [[ -n "$DURATION" ]]; then
+      ffmpeg -hide_banner -loglevel warning \
+        -f v4l2 -framerate "$FPS" -video_size "${W}x${H}" \
+        -i "$DEV" -t "$DURATION" \
+        -c copy "$OUTFILE" &
+    else
+      ffmpeg -hide_banner -loglevel warning \
+        -f v4l2 -framerate "$FPS" -video_size "${W}x${H}" \
+        -i "$DEV" \
+        -c copy "$OUTFILE" &
+    fi
+  fi
+
+  FFPID=$!
+  wait "$FFPID" 2>/dev/null || true
+  echo "Saved: $OUTFILE"
+}
+
+apply_controls
+record_video
