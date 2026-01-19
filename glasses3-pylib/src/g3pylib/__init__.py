@@ -35,7 +35,11 @@ from g3pylib.recorder import Recorder
 from g3pylib.recordings import Recordings
 from g3pylib.rudimentary import Rudimentary
 from g3pylib.settings import Settings
-from g3pylib.streams import Streams
+try:
+    from g3pylib.streams import Streams
+except Exception:
+    Streams = None
+#from g3pylib.streams import Streams
 from g3pylib.system import System
 from g3pylib.websocket import G3WebSocketClientProtocol
 from g3pylib.zeroconf import DEFAULT_WEBSOCKET_PATH, G3Service, G3ServiceDiscovery
