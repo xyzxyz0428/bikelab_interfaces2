@@ -22,7 +22,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from g3pylib import connect_to_glasses
-G3_HOSTNAME = os.environ.get("G3_HOSTNAME")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("g3-save")
@@ -63,6 +62,98 @@ async def check_clock_offset(g3) -> timedelta:
     logger.info("device_time=%s local_utc=%s offset=%s", device_time.isoformat(), local_utc.isoformat(), offset)
     return offset
 
+async def run_calibration(g3, max_attempts: int = 3, marker_wait_s: float = 3.0) -> bool:
+    """
+    Marker-based calibration BEFORE recording.
+
+    Workflow:
+      1) Ask operator to position the official target at ~50-100 cm.
+      2) Enable marker detection (emit-markers) for a few seconds.
+      3) (Optional) Listen for marker signal and print marker pose if available.
+      4) When ready, trigger calibrate(true).
+    """
+    loop = asyncio.get_running_loop()
+
+    for attempt in range(1, max_attempts + 1):
+        logger.info("Calibration attempt %d / %d", attempt, max_attempts)
+        logger.info(
+            "Place Tobii calibration target in front of participant (~50-100 cm). "
+            "Ask participant to fixate the center dot. Hold still."
+        )
+
+        # Step 1: enable marker detection for ~3 seconds (or until calibration completes)
+        try:
+            # Some SDKs expose this as g3.calibrate.emit_markers() or a generic action call.
+            # We try both patterns to be robust.
+            if hasattr(g3, "calibrate") and hasattr(g3.calibrate, "emit_markers"):
+                await g3.calibrate.emit_markers()
+                logger.info("Marker detection enabled (emit-markers).")
+            elif hasattr(g3, "calibrate") and hasattr(g3.calibrate, "emitMarkers"):
+                await g3.calibrate.emitMarkers()
+                logger.info("Marker detection enabled (emit-markers).")
+            else:
+                # If the SDK uses a generic action interface, you can adapt here.
+                logger.info("emit-markers API not found in this g3pylib build; continuing without marker stream.")
+        except Exception as e:
+            logger.warning("Failed to enable marker detection (emit-markers): %s", e)
+
+        # Step 2: optionally read marker signal if the SDK provides a subscription method
+        marker_seen = False
+        try:
+            # Typical pattern (if available): subscribe_to_marker() returns (queue, unsubscribe)
+            if hasattr(g3, "calibrate") and hasattr(g3.calibrate, "subscribe_to_marker"):
+                q, unsub = await g3.calibrate.subscribe_to_marker()
+                logger.info("Subscribed to calibrate:marker signal (waiting up to %.1fs)...", marker_wait_s)
+                try:
+                    msg = await asyncio.wait_for(q.get(), timeout=marker_wait_s)
+                    # Expected body: [timestamp, [x,y,z], [u,v]]
+                    logger.info("Marker signal: %s", msg)
+                    marker_seen = True
+                except asyncio.TimeoutError:
+                    logger.warning("No marker signal received within %.1fs.", marker_wait_s)
+                finally:
+                    try:
+                        await unsub
+                    except Exception:
+                        pass
+            else:
+                # No subscription available; just wait a moment so emit-markers can do work
+                await asyncio.sleep(marker_wait_s)
+        except Exception as e:
+            logger.warning("Marker subscription not available / failed: %s", e)
+
+        # Step 3: trigger calibration
+        logger.info("Press ENTER to trigger calibration now...")
+        await loop.run_in_executor(None, input, "")
+
+        try:
+            # New method: calibrate(true) -> returns detailed result, e.g., "success"
+            if hasattr(g3, "calibrate") and hasattr(g3.calibrate, "calibrate"):
+                result = await g3.calibrate.calibrate(True)
+            elif hasattr(g3, "calibrate") and hasattr(g3.calibrate, "run"):
+                # Old method: run() -> True/False
+                result = await g3.calibrate.run()
+            else:
+                raise RuntimeError("No calibration API found (expected g3.calibrate.calibrate or g3.calibrate.run).")
+
+            logger.info("Calibration result: %r", result)
+
+            if isinstance(result, str):
+                if result.lower().startswith("success"):
+                    logger.info("Calibration SUCCESS.")
+                    return True
+            elif isinstance(result, bool):
+                if result:
+                    logger.info("Calibration SUCCESS.")
+                    return True
+
+            logger.warning("Calibration not successful (result=%r). Adjust target/pose and retry.", result)
+
+        except Exception as e:
+            logger.exception("Calibration attempt failed: %s", e)
+
+    logger.error("Calibration failed after %d attempts.", max_attempts)
+    return False
 
 async def start_and_run_recording(hostname: str, output_base: Path):
     """
@@ -153,6 +244,15 @@ async def start_and_run_recording(hostname: str, output_base: Path):
                     logger.debug("Could not verify device time after set_time")
             except Exception as e:
                 logger.exception("Failed to set device time from local system time: %s", e)
+        
+        # --- Calibration BEFORE recording ---
+        logger.info("Starting calibration workflow before recording...")
+        calib_ok = await run_calibration(g3, max_attempts=3)
+        if not calib_ok:
+            logger.error("Calibration failed. Recording will NOT start.")
+            return
+        logger.info("Calibration completed successfully. Proceeding to recording.")
+        # --- End calibration ---
 
         # Prepare to subscribe to started signal
         queue, unsubscribe = await g3.recorder.subscribe_to_started()
@@ -209,7 +309,8 @@ async def start_and_run_recording(hostname: str, output_base: Path):
 
 def main():
     load_dotenv()
-    hostname = G3_HOSTNAME
+    hostname = os.environ.get("G3_HOSTNAME") or "192.168.1.166"
+
     if not hostname:
         raise RuntimeError("Set G3_HOSTNAME environment variable to the device hostname or IP.")
     out_base = DEFAULT_OUTPUT_BASE
