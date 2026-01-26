@@ -30,10 +30,9 @@ lidar:
       start_angle: 0               #  Start angle of point cloud
       end_angle: 360               #  End angle of point cloud
 
-                                   #  When msg_source is 3, the following parameters will be used
-      pcap_repeat: true            #  true: The pcap bag will repeat play   
-      pcap_rate: 1.0               #  Rate to read the pcap file
-      pcap_path: /home/robosense/lidar.pcap #The path of pcap file
+      split_frame_mode: 3
+      num_blks_split: 1800      # 一圈一帧（典型 RS 雷达）
+
 
     ros:
       ros_frame_id: rslidar_201                           #Frame id of packet message and point cloud message
@@ -67,10 +66,9 @@ lidar:
       start_angle: 0               #  Start angle of point cloud
       end_angle: 360               #  End angle of point cloud
 
-                                   #  When msg_source is 3, the following parameters will be used
-      pcap_repeat: true            #  true: The pcap bag will repeat play   
-      pcap_rate: 1.0               #  Rate to read the pcap file
-      pcap_path: /home/robosense/lidar.pcap #The path of pcap file
+      split_frame_mode: 3
+      num_blks_split: 1800      # 一圈一帧（典型 RS 雷达）
+
 
     ros:
       ros_frame_id: rslidar_202                           #Frame id of packet message and point cloud message
@@ -79,6 +77,7 @@ lidar:
       ros_send_imu_data_topic: /rslidar_imu_data_202         #Topic used to send imu data through ROS
       ros_send_point_cloud_topic: /rslidar_points_202      #Topic used to send point cloud through ROS
       ros_queue_length: 100                              #Topic QoS history depth
+
   - driver:
       lidar_type: RSBP             #  LiDAR type - RS16, RS32, RSBP, RSAIRY, RSHELIOS, RSHELIOS_16P, RS128, RS80, RS48, RSP128, RSP80, RSP48, 
                                    #               RSM1, RSM1_JUMBO, RSM2, RSM3, RSE1, RSMX.
@@ -103,10 +102,9 @@ lidar:
       start_angle: 0               #  Start angle of point cloud
       end_angle: 360               #  End angle of point cloud
 
-                                   #  When msg_source is 3, the following parameters will be used
-      pcap_repeat: true            #  true: The pcap bag will repeat play   
-      pcap_rate: 1.0               #  Rate to read the pcap file
-      pcap_path: /home/robosense/lidar.pcap #The path of pcap file
+      split_frame_mode: 3
+      num_blks_split: 1800      # 一圈一帧（典型 RS 雷达）
+
 
     ros:
       ros_frame_id: rslidar_200                           #Frame id of packet message and point cloud message
