@@ -9,7 +9,7 @@ import cv2
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
-from sensor_msgs.msg import Image, CompressedImage
+from sensor_msgs.msg import Image #, CompressedImage
 
 
 class CameraPublisher(Node):
@@ -36,7 +36,7 @@ class CameraPublisher(Node):
         )
         # 两个发布器：raw + compressed
         self.pub_raw = self.create_publisher(Image, '/camera/image_raw', qos)
-        self.pub_compressed = self.create_publisher(CompressedImage, '/camera/image_compressed', qos)
+        #self.pub_compressed = self.create_publisher(CompressedImage, '/camera/image_compressed', qos)
 
         # ---- 打开摄像头（V4L2 + MJPG）----
         self.cap = cv2.VideoCapture(self.device_id, cv2.CAP_V4L2)
@@ -117,17 +117,17 @@ class CameraPublisher(Node):
         self.pub_raw.publish(raw_msg)
 
         # -------- CompressedImage (jpeg) --------
-        ok, buf = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-        if not ok:
-            return
+        #ok, buf = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+        #if not ok:
+        #    return
 
-        comp_msg = CompressedImage()
-        comp_msg.header.stamp = stamp
-        comp_msg.header.frame_id = self.frame_id
-        comp_msg.format = 'jpeg'
-        comp_msg.data = array.array('B', buf.tobytes())
+        #comp_msg = CompressedImage()
+        #comp_msg.header.stamp = stamp
+        #comp_msg.header.frame_id = self.frame_id
+        #comp_msg.format = 'jpeg'
+        #comp_msg.data = array.array('B', buf.tobytes())
 
-        self.pub_compressed.publish(comp_msg)
+        #self.pub_compressed.publish(comp_msg)
 
     def destroy_node(self):
         self._running = False
