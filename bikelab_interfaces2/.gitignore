@@ -1,7 +1,0 @@
-__pycache__/
-*.pyc
-*.log
-*.bag
-*.db
-.DS_Store
-.vscode/

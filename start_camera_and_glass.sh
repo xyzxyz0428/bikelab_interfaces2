@@ -4,7 +4,7 @@ set -euo pipefail
 SESSION="bikelab_interfaces2"
 WIN_NAME="camera_glasses"
 
-G3_DIR="/home/ubuntu/ros2_ws/src/glasses3-pylib"
+G3_DIR="/home/ubuntu/ros2_ws/src/bikelab_interfaces2/glasses3-pylib"
 
 G3_PY="$HOME/.pyenv/versions/g3env/bin/python"
 
