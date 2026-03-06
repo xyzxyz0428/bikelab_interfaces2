@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ---------------------------
+# 1) PTP slave check
+# ---------------------------
+echo "# 1) PTP slave check (TIME_STATUS_NP):"
+echo "#    true  = gmPresent is true AND |master_offset| < 1,000,0000 ns (10 ms)"
+echo "#    false = otherwise"
+
+ptp_slave="$(
+  sudo pmc -u -b 0 "GET PORT_DATA_SET" "GET TIME_STATUS_NP" 2>/dev/null | awk '
+/portState/     {ps=$2}
+/gmPresent/     {gm=$2}
+/master_offset/ {mo=$2}
+END {
+  ok=(ps=="SLAVE" && (gm=="1"||gm=="true") && mo!="" && mo<10000000 && mo>-10000000)
+  printf("PTP_lock=%s portState=%s gmPresent=%s master_offset_ns=%s\n",
+         ok?"true":"false", (ps?ps:"NA"), (gm?gm:"NA"), (mo?mo:"NA"))
+}'
+)"
+echo "$ptp_slave"
+
+# Extract PTP boolean (true/false) from the printed line
+ptp_ok="$(echo "$ptp_slave" | awk '
+{
+  for (i=1; i<=NF; i++) {
+    if ($i ~ /^PTP_lock=/) {
+      split($i, a, "=")
+      print a[2]
+      exit
+    }
+  }
+}')"
+
+echo
+
+# ---------------------------
+# 2) Eyetracker NTP sync check
+# ---------------------------
+echo "# 2) Eyetracker NTP sync check (HTTP endpoint):"
+echo "#    true  = endpoint indicates synchronized"
+echo "#    false = endpoint indicates NOT synchronized, or request failed"
+
+eye_resp="$(curl -fsS --max-time 2 "http://192.168.1.166/rest/system.ntp-is-synchronized" 2>/dev/null || true)"
+
+# Try to interpret common responses: true/false, 1/0, JSON containing "true"/"false"
+eye_ok="false"
+if echo "$eye_resp" | grep -qiE 'true|1'; then
+  eye_ok="true"
+elif echo "$eye_resp" | grep -qiE 'false|0'; then
+  eye_ok="false"
+else
+  eye_ok="false"
+fi
+
+echo "$eye_ok"
+echo "#    raw response: ${eye_resp:-<empty/no response>}"
+
+echo
+
+# ---------------------------
+# Gate: only continue if BOTH checks are true
+# ---------------------------
+if [[ "${ptp_ok:-false}" != "true" || "${eye_ok:-false}" != "true" ]]; then
+  echo "# 3) LiDAR start/check skipped"
+  echo "#    Reason: requires PTP_lock=true AND eyetracker_ntp_sync=true"
+  echo "#    Current: PTP_lock=${ptp_ok:-NA}, eyetracker_ntp_sync=${eye_ok:-NA}"
+  exit 0
+fi
+
+# ---------------------------
+# 3) Start LiDARs (keep running) + Time sync check
+# ---------------------------
+SESSION="bikelab_interfaces2"
+
+# thresholds for time check
+THRESH="0.1"         # seconds; pass if |now - stamp| < THRESH
+TIMEOUT_S="3"        # seconds; max wait for one message per topic
+WAIT_AFTER_START="2" # seconds; wait after launching before checking topics
+
+topics=(/rslidar_points_200 /rslidar_points_201 /rslidar_points_202)
+
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "tmux not found. Install it with: sudo apt update && sudo apt install -y tmux"
+  exit 2
+fi
+
+# 3A) Start LiDAR launch in detached tmux session
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  echo "# 3A) tmux session '$SESSION' already exists (not starting another)."
+else
+  tmux new-session -d -s "$SESSION" -n lidar \
+    "echo '[LiDAR] ros2 launch rslidar_sdk start.py'; ros2 launch rslidar_sdk start.py"
+  echo "# 3A) started tmux session '$SESSION' (detached). Attach: tmux attach -t $SESSION"
+fi
+
+# 3B) Time sync check via ROS topic timestamps
+echo
+echo "# 3B) LiDAR time alignment check vs local clock"
+echo "#     true  = |now - header.stamp| < ${THRESH}s  (LiDAR timestamps aligned to this PC)"
+echo "#     false = no message within ${TIMEOUT_S}s OR timestamp far from local time"
+
+sleep "$WAIT_AFTER_START"
+
+for topic in "${topics[@]}"; do
+  echo "Checking ${topic} ..."
+  out="$(
+    timeout "${TIMEOUT_S}" ros2 topic echo "${topic}" 2>/dev/null \
+    | awk -v th="$THRESH" '
+        { sub(/\r$/, "", $0) }
+
+        # Grab sec value (first occurrence)
+        /sec:/ && sec=="" {
+          # line like "sec: 1771596917"
+          sec=$2
+          next
+        }
+
+        # Grab nanosec value (first occurrence)
+        /nanosec:/ && nsec=="" {
+          nsec=$2
+
+          # Get current time *now*, at the moment we see the stamp
+          cmd = "date +%s.%N"
+          cmd | getline now
+          close(cmd)
+
+          stamp = sec + nsec/1e9
+          dt = now - stamp
+          if (dt < 0) dt = -dt
+
+          ok = (dt < th) ? "true" : "false"
+          printf("dt=%.6f s %s (now=%.9f stamp=%.9f)\n",
+                 dt, ok, now, stamp)
+          exit
+        }
+
+        END {
+          if (sec=="" || nsec=="") {
+            printf("dt=NA false (no message / parse failed)\n")
+          }
+        }
+      '
+  )" || true
+
+  dt="$(echo "$out" | awk '{sub("dt=","",$1); print $1}')"
+  ok="$(echo "$out" | awk '{print $2}')"
+
+  if [[ "$dt" == "NA" ]]; then
+    echo "  - ${topic}: dt=NA -> false (no message / parse failed)"
+  elif [[ "$ok" == "true" ]]; then
+    echo "  - ${topic}: dt=${dt}s -> true  (aligned)"
+  else
+    echo "  - ${topic}: dt=${dt}s -> false (NOT aligned)"
+  fi
+done

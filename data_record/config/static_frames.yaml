@@ -1,0 +1,76 @@
+frames:
+  # -----------------------------
+  # Core body frame (root) base_link is the center of rear wheel
+  # -----------------------------
+  # measure
+  #- parent: base_link
+  #  child: rear_lidar
+  #  xyz: [-0.096, 0.0000, 0.9038]     
+  #  rpy: [0.0000, 0.0000, 3.1415]     
+   
+  - parent: base_link
+    child: middle_lidar
+    xyz: [1.174865, 0.001400, 0.528561]
+    rpy: [-0.001273, 0.008431, -0.053722]
+
+  - parent: base_link
+    child: gps_link
+    xyz: [-0.0468, -0.0143, 0.4708]    
+    rpy: [0.0000, 0.0000, 0.0000]     
+
+  - parent: base_link
+    child: imu_link
+    xyz: [0.045, 0.0000, 0.4708]     
+    rpy: [3.1415, 0.0000, 0.0000]     
+
+  # -----------------------------
+  # ICP-calibrated rear lidar (front -> rear)
+  # from your averaged ICP result (excluding r13)
+  # -----------------------------
+  - parent: middle_lidar
+    child: rear_lidar
+    xyz: [-1.27207452, -0.07010257, 0.36443799]
+    rpy: [-0.00081919, 0.00848740, -3.08797213]
+
+  - parent: middle_lidar
+    child: front_lidar
+    xyz: [0.202693, 0.014740, -0.110093]
+    rpy: [2.003349,-1.551893,1.162586]
+
+  # -----------------------------
+  # Camera
+  # -----------------------------
+
+  - parent: base_link
+    child: camera_link
+    xyz: [0.1120, 0.0600, 1.2700]     
+    rpy: [0.0000, 0.0000, 0.0000]   
+
+  - parent: camera_link
+    child: camera_optical_frame
+    xyz: [0.0000, 0.0600, 0.0000]     
+    rpy: [-1.5707633,0.0000,-1.5707633]    
+
+  ## ROS optical frame convention: x-right, y-down, z-forward
+  #- parent: camera_link
+  #  child: camera_optical_frame
+  #  xyz: [0.0000, 0.0000, 0.0000]
+  #  rpy: [-1.57079632679, 0.0000, -1.57079632679]
+
+  ## -----------------------------
+  ## Optional sensor mounting frames (good for dataset docs)
+  ## -----------------------------
+  #- parent: base_link
+  #  child: steering_encoder_link
+  #  xyz: [0.4500, 0.0000, 0.9500]     # TODO
+  #  rpy: [0.0000, 0.0000, 0.0000]
+
+  #- parent: base_link
+  #  child: garmin_speed_sensor_link
+  #  xyz: [-0.3000, 0.0000, 0.3500]    # TODO rear hub area
+  #  rpy: [0.0000, 0.0000, 0.0000]
+
+  #- parent: base_link
+  #  child: garmin_powermeter_link
+  #  xyz: [0.1000, 0.0000, 0.3000]     # TODO bottom bracket / crank
+  #  rpy: [0.0000, 0.0000, 0.0000]
