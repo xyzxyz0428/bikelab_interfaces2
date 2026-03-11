@@ -50,7 +50,7 @@ class CameraRecorder:
         self._grab_t0 = time.time()
 
         # Recorder counters
-        self._frame_idx = 0
+        self._frame_idx = 1
 
         # --- video writer (MJPG AVI) ---
         self.video_path = os.path.join(self.out_dir, "video_mjpg.avi")
